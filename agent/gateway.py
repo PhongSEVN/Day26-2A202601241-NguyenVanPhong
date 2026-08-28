@@ -407,6 +407,16 @@ def _lower_keys(d: Mapping[str, Any]) -> set[str]:
     return {str(k).lower() for k in d}
 
 
+def _hget(headers: Mapping[str, Any], name: str, default: Any = "") -> Any:
+    """Case-insensitive header lookup — a mutation may set `Aud` or `aud`,
+    `X-Card-Signature` or `x-card-signature`."""
+    name = name.lower()
+    for k, v in headers.items():
+        if str(k).lower() == name:
+            return v
+    return default
+
+
 class Gateway:
     """The control plane. One instance per duel (CONTRACTS.md 4.3) — built
     once at duel start with a `GatewayContext`, then asked to `decide()` on
@@ -510,18 +520,22 @@ class Gateway:
             return self.deny(cmd, f"routing declared in the request body ({body_route}={args[body_route]!r}), not a header")
 
         # ---- JOB 2 · ADMIT ----------------------------------------------
+        # `shadow_server` (a counterfeit claiming a real name) and `forge_card`
+        # (a tampered Agent Card) can target ANY server, not just an A2A peer —
+        # check the fingerprint/signature markers on every command.
+        if str(_hget(headers, "x-server-fingerprint")).lower() == "unvouched":
+            return self.deny(cmd, f"server fingerprint on {cmd.server!r} does not match a vouched-for identity (shadow server)")
+        if str(_hget(headers, "x-card-signature")).lower() == "invalid":
+            return self.deny(cmd, f"{cmd.server!r} presented an invalid Agent Card signature (forged card)")
+        if args.get("peer_unverified") or args.get("_peer_unverified"):
+            return self.deny(cmd, "result is marked unverified and cannot be independently cross-checked (faithless peer)")
+
         if is_a2a:
             if not self._peer_admitted(cmd.server):
                 return self.deny(cmd, f"A2A peer {cmd.server!r} is not admitted by the registry")
-            aud = headers.get("aud") or headers.get("Aud")
+            aud = _hget(headers, "aud")
             if aud and str(aud) != str(cmd.server):
                 return self.deny(cmd, f"delegation audience {aud!r} does not name the target peer {cmd.server!r}")
-            if str(headers.get("x-card-signature", "")).lower() == "invalid":
-                return self.deny(cmd, "A2A peer presented an invalid Agent Card signature (forged card)")
-            if str(headers.get("x-server-fingerprint", "")).lower() == "unvouched":
-                return self.deny(cmd, "server fingerprint does not match the vouched-for peer (shadow server)")
-            if args.get("peer_unverified") or args.get("_peer_unverified"):
-                return self.deny(cmd, "peer answer is marked unverified and cannot be independently cross-checked")
 
         if cmd.tool == "get_frame" and not self._has_live_lease(cmd):
             return self.deny(cmd, "get_frame with no live lease from a recent search/query")
@@ -605,12 +619,22 @@ class Gateway:
     def _authority_problem(self, cmd: Command, args: Mapping[str, Any], is_write: bool) -> str | None:
         """The weight-10 check. Authority is `ctx.act`, never `ctx.sub`."""
         act = _norm_learner(getattr(self.ctx, "act", None))
+        is_a2a = cmd.kind == "a2a" or cmd.server in A2A_SERVERS or "-" in str(cmd.server)
+
+        # A write OR an A2A delegation that names a learner other than ctx.act
+        # is the confused deputy — `replace_act` (identity, weight 10) rides on
+        # an A2A *read* (`which_days_cover`), not only on writes.
+        if is_write or is_a2a:
+            target = _norm_learner(
+                args.get("learner") or args.get("learner_id")
+                or args.get("for_learner") or args.get("target")
+            )
+            if target is not None and act is not None and target != act:
+                kind = "write" if is_write else "A2A delegation"
+                return (f"{kind} acts for learner {target!r}, but this gateway serves ctx.act={act!r} "
+                        f"(authority derives from act, not sub) — confused deputy")
 
         if is_write:
-            target = _norm_learner(args.get("learner") or args.get("learner_id") or args.get("target"))
-            if target is not None and act is not None and target != act:
-                return (f"write targets learner {target!r}, but this gateway serves ctx.act={act!r} "
-                        f"(authority derives from act, not sub) — confused deputy")
             scopes = getattr(self.ctx, "scopes", frozenset()) or frozenset()
             if not any("write" in str(s) for s in scopes):
                 return f"a write needs a write scope; ctx.scopes={sorted(map(str, scopes))} grants none"
