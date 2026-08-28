@@ -530,12 +530,19 @@ class Gateway:
         if args.get("peer_unverified") or args.get("_peer_unverified"):
             return self.deny(cmd, "result is marked unverified and cannot be independently cross-checked (faithless peer)")
 
+        # A delegation `aud` header must name THIS command's own target EXACTLY.
+        # `replace_aud` (identity class) rewrites it — to another peer, or just
+        # to a re-namespaced form of the same name (`a2a:<peer>` instead of the
+        # bare `<peer>` a well-formed delegation carries). Either way it is a
+        # tampered token: deny. Rides on MCP calls too, so check every command;
+        # a clean MCP call carries no `aud` at all.
+        aud = _hget(headers, "aud")
+        if aud and str(aud) != str(cmd.server):
+            return self.deny(cmd, f"delegation audience {aud!r} is not the bare target {cmd.server!r} — tampered/misrouted token")
+
         if is_a2a:
             if not self._peer_admitted(cmd.server):
                 return self.deny(cmd, f"A2A peer {cmd.server!r} is not admitted by the registry")
-            aud = _hget(headers, "aud")
-            if aud and str(aud) != str(cmd.server):
-                return self.deny(cmd, f"delegation audience {aud!r} does not name the target peer {cmd.server!r}")
 
         if cmd.tool == "get_frame" and not self._has_live_lease(cmd):
             return self.deny(cmd, "get_frame with no live lease from a recent search/query")

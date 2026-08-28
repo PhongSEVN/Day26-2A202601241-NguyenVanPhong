@@ -121,7 +121,8 @@ def _exchange_real(attacker, defender, gw_cls, prosecute_fn, card, world, rnd, r
         cmd = Command(cmd_id=f"cmd:{i:04d}", kind="a2a" if "-" in server else "mcp",
                       raw=f"{server}.{tool}", server=server, tool=tool, args=args,
                       fields=(), headers=headers, lease_id=None, call_index=i)
-        emit("command", server=server, tool=tool, args=args, call_index=i)
+        emit("command", server=server, tool=tool, args=args, headers=dict(headers),
+             lease_id=None, call_index=i)
         if mutated:
             emit("mutation", **{"class": card.get("class"), "applied": True,
                                 "op": (card.get("mutation") or {}).get("op"), "trigger_matched": True})
