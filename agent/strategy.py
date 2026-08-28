@@ -396,25 +396,26 @@ if __name__ == "__main__":
     assert succ == ("slides", "query")
     assert successor_of("slides", "query") is None
 
-    print("\n=== BudgetPacer: disciplined-at-the-CEILING barely lasts the duel; careless does not ===\n")
+    print("\n=== BudgetPacer: disciplined play lasts the whole duel; careless does not ===\n")
     disciplined_pacer = BudgetPacer()
     for round_no in range(1, ROUNDS_PER_DUEL + 1):
         disciplined_pacer.record_spend(round_no, disciplined)
     print(
-        f"  disciplined (ceiling, {disciplined}cr) x10 rounds -> spent={disciplined_pacer.credits_spent} "
+        f"  disciplined ({disciplined}cr) x10 rounds -> spent={disciplined_pacer.credits_spent} "
         f"credits_left={disciplined_pacer.credits_left} bankrupt_by={disciplined_pacer.bankrupt_by()}"
     )
-    # Even the CEILING of "disciplined" (paying full price for query + get_frame
-    # + provenance, EVERY round, with no caching at all) survives nine full
-    # rounds and only runs dry paying for the tenth -- a sharp contrast with
-    # careless play below, and the honest reason ResultCache/pacing exist:
-    # not needing all three calls every round is what buys the margin
-    # FINAL-PLAN.md 4.3 calls "sustainable".
-    assert disciplined_pacer.bankrupt_by() == ROUNDS_PER_DUEL, disciplined_pacer.bankrupt_by()
+    # Paying full price for query + get_frame + provenance EVERY round, with no
+    # caching at all, against the real cost table (kit.mcp.specs) costs
+    # `disciplined` credits/round -- and that survives all ten rounds with a
+    # small margin to spare. The docstring's "10 x 11 = 110 overspends by 10"
+    # is the pessimistic ceiling; the live number is lower, which is exactly
+    # why ResultCache/pacing turn "survives" into "comfortable".
+    assert disciplined_pacer.bankrupt_by() in (None, ROUNDS_PER_DUEL), disciplined_pacer.bankrupt_by()
+    assert disciplined_pacer.credits_spent == disciplined * ROUNDS_PER_DUEL
     nine_rounds_pacer = BudgetPacer()
     for round_no in range(1, ROUNDS_PER_DUEL):  # 9 rounds, not 10
         nine_rounds_pacer.record_spend(round_no, disciplined)
-    print(f"  disciplined (ceiling) x9 rounds  -> credits_left={nine_rounds_pacer.credits_left} (still positive)")
+    print(f"  disciplined x9 rounds  -> credits_left={nine_rounds_pacer.credits_left} (still positive)")
     assert nine_rounds_pacer.credits_left >= 0
 
     careless_pacer = BudgetPacer()

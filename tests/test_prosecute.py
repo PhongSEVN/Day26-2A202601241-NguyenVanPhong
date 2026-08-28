@@ -21,9 +21,10 @@ Covers, in order:
   7. The committed fixture set itself: >= 24 fixtures, all 17 classes covered
      with >= 2 traces each, at least one clean (no-defect) fixture, exactly one
      near_miss per class, deterministic on-disk build.
-  8. The starter `prosecute()` end to end against the real fixture set: zero
-     errors, zero timeouts, zero false claims, perfect precision, low overall
-     recall, and 100% recall on the one class it actually implements.
+  8. The full `prosecute()` end to end against the real fixture set: zero
+     errors, zero timeouts, zero false claims, perfect precision, and total
+     recall — every one of the 17 classes verified on both its positive and
+     its near_miss fixture, and nothing filed on the clean traces.
 
 pytest only (permitted in tests/ per this workspace's hard rules). No network, no
 unseeded randomness.
@@ -531,32 +532,31 @@ def test_prosecute_stays_well_under_the_five_second_deadline_even_on_a_large_tra
     assert result["v"] == 1
 
 
-def test_starter_end_to_end_against_the_full_fixture_set(labelled_fixtures):
+def test_full_prosecutor_end_to_end_against_the_full_fixture_set(labelled_fixtures):
     report = score_prosecutor(prosecute, labelled_fixtures)
 
     assert report["n_fixtures"] == len(labelled_fixtures)
     assert report["n_errors"] == 0
     assert report["n_timeouts"] == 0
-    assert report["false"] == 0, "the starter's one detector must never file a false claim on this fixture set"
-    assert report["rejected"] == 0, "the starter must never emit a schema-invalid or over-quota claim on its own"
+    assert report["false"] == 0, "no detector may file a false claim on this fixture set"
+    assert report["rejected"] == 0, "prosecute() must never emit a schema-invalid or over-quota claim on its own"
 
-    # precision perfect: it never guesses wrong when it does file
+    # precision perfect: every filed claim verifies against the ground-truth proof refs
     assert report["precision"] == 1.0
-    # recall low: it implements exactly 1 of 17 classes
-    assert 0.0 < report["recall"] < 0.15
+    # recall near-total: all 17 detectors implemented, each cites the real
+    # evidence on both its positive and its near_miss trace
+    assert report["recall"] >= 0.9
     assert report["false_claim_rate"] == 0.0
 
-    assert report["per_class"]["enforcement_failure"]["recall"] == 1.0
-    assert report["per_class"]["enforcement_failure"]["present"] == 2
-    assert report["per_class"]["enforcement_failure"]["verified"] == 2
-    # every other class: present in the fixtures, but never claimed (stub hooks)
-    for cls in CLASSES - {"enforcement_failure"}:
-        assert report["per_class"][cls]["present"] >= 2
-        assert report["per_class"][cls]["claimed"] == 0
+    # every class: present on 2 fixtures, and both verified (positive + near_miss)
+    for cls in CLASSES:
+        pc = report["per_class"][cls]
+        assert pc["present"] == 2, (cls, pc)
+        assert pc["verified"] == 2, (cls, pc)
 
 
-def test_starter_files_nothing_on_clean_fixtures(labelled_fixtures):
+def test_prosecutor_files_nothing_on_clean_fixtures(labelled_fixtures):
     clean = [fx for fx in labelled_fixtures if not fx["label"]["present_classes"]]
     for fx in clean:
         result = prosecute(fx["trace"], fx["answer"], fx["card"])
-        assert result["claims"] == [], f"{fx['fixture_id']} is clean but the starter filed {result['claims']}"
+        assert result["claims"] == [], f"{fx['fixture_id']} is clean but prosecute() filed {result['claims']}"
